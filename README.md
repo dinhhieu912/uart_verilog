@@ -1,10 +1,6 @@
 # UART RTL Design & Verification
 
 > Full-duplex UART transceiver implemented in Verilog — configurable baud rate, parity, and stop-bit options with directed testbench verification.
-
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/hi%E1%BA%BFu-tr%E1%BA%A7n-59a741305/)
-[![Gmail](https://img.shields.io/badge/Gmail-D14836?style=flat-square&logo=gmail&logoColor=white)](mailto:dinhhieu9125@gmail.com)
-
 ---
 
 ## 📌 Overview
