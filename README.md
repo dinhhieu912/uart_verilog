@@ -55,9 +55,8 @@ uart-project/
 │   ├── uart_tx.v        # Transmitter module
 │   ├── uart_rx.v        # Receiver module
 │   └── uart_top.v       # Top-level integration
-├── tb/
-│   ├── tb_uart_tx.v     # TX testbench
-│   └── tb_uart_rx.v     # RX testbench
+├── uart_tb.v            # Uart testbench
+│ 
 └── README.md
 ```
 
