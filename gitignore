@@ -1,0 +1,77 @@
+# ============================================================
+#  .gitignore for Verilog / VHDL FPGA Projects
+# ============================================================
+
+# --------------------------
+# Simulation output
+# --------------------------
+*.vcd          # Value Change Dump (waveform)
+*.lxt
+*.lxt2
+*.fst
+*.ghw
+work/          # ModelSim/QuestaSim work library
+transcript     # ModelSim log
+
+# --------------------------
+# Xilinx Vivado
+# --------------------------
+*.jou          # Journal file
+*.log
+*.str
+*.mif
+*.xpr.bak
+.Xil/
+vivado*/
+runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.gen/
+*.sim/
+*.srcs/sources_1/ip/
+
+# --------------------------
+# Intel Quartus
+# --------------------------
+db/
+incremental_db/
+output_files/
+*.qws
+*.bak
+*.rpt
+*.smsg
+*.summary
+*.done
+*.pin
+*.pof
+*.sof
+*.jdi
+*.qdf
+
+# --------------------------
+# Cadence / Synopsys
+# --------------------------
+csrc/
+simv
+simv.daidir/
+*.fsdb
+*.vpd
+*.shm/
+DVEfiles/
+ucli.key
+
+# --------------------------
+# EDA Playground / online tools
+# --------------------------
+*.swp
+*.swo
+
+# --------------------------
+# IDE & OS
+# --------------------------
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+desktop.ini
