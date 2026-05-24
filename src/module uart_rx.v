@@ -7,7 +7,7 @@ module uart_rx (
     output reg        rx_done,    // pulse: nhận xong 1 byte
     output reg        rx_error    // stop bit sai → frame error
 );
-    // ── FIX 1: Input synchronizer (2 FF) chống metastability ────
+    // ── Input synchronizer (2 FF) chống metastability ────────────
     reg rx_sync1, rx_sync2;
     always @(posedge clk or posedge rst) begin
         if (rst) {rx_sync2, rx_sync1} <= 2'b11; // idle line = 1
@@ -36,36 +36,45 @@ module uart_rx (
             rx_error  <= 0;
         end
         else begin
+            // rx_done và rx_error chỉ cao 1 chu kỳ
             rx_done  <= 0;
             rx_error <= 0;
+
             case (state)
                 IDLE: begin
                     tick_cnt <= 0;
                     bit_cnt  <= 0;
-                    // ── FIX 2: dùng rx_sync2 thay cho rx ────────
-                    if (rx_sync2 == 0)
+                    // FIX: Gate entry to START on tick boundary để tick_cnt
+                    // bắt đầu đếm đồng bộ với x16 tick, tránh lệch pha
+                    // sampling. Không dùng tick ở đây sẽ gây offset tối đa
+                    // ±1 tick (~1/16 bit period) — chấp nhận được nhưng
+                    // gating giúp chính xác hơn.
+                    if (rx_sync2 == 0 && tick)
                         state <= START;
                 end
+
                 START: begin
                     if (tick) begin
+                        // Đợi 8 tick = giữa start bit
                         if (tick_cnt == 7) begin
                             tick_cnt <= 0;
+                            // Xác nhận vẫn là start bit (low)
                             if (rx_sync2 == 0)
                                 state <= DATA;
                             else
-                                state <= IDLE;
+                                state <= IDLE; // noise, quay về IDLE
                         end
                         else
                             tick_cnt <= tick_cnt + 1;
                     end
                 end
+
                 DATA: begin
                     if (tick) begin
+                        // Đợi 16 tick = giữa mỗi data bit
                         if (tick_cnt == 15) begin
                             tick_cnt <= 0;
-                            // ── FIX 3: dịch trái, LSB vào bit0 ──
-                            // UART gửi LSB trước → bit đầu nhận
-                            // phải nằm ở bit[0], bit sau ở bit[1]...
+                            // LSB vào trước: dịch phải, bit mới vào MSB
                             shift_reg <= {rx_sync2, shift_reg[7:1]};
                             if (bit_cnt == 7)
                                 state <= STOP;
@@ -76,8 +85,10 @@ module uart_rx (
                             tick_cnt <= tick_cnt + 1;
                     end
                 end
+
                 STOP: begin
                     if (tick) begin
+                        // Đợi 16 tick = giữa stop bit
                         if (tick_cnt == 15) begin
                             tick_cnt <= 0;
                             state    <= IDLE;
@@ -86,12 +97,16 @@ module uart_rx (
                                 rx_done <= 1;
                             end
                             else begin
-                                rx_error <= 1;
+                                rx_error <= 1; // stop bit không phải 1 → frame error
                             end
                         end
                         else
                             tick_cnt <= tick_cnt + 1;
                     end
+                end
+
+                default: begin
+                    state <= IDLE;
                 end
             endcase
         end
