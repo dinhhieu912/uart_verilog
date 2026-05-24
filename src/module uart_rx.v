@@ -1,14 +1,5 @@
 
-Claude finished the response
-dựa trên những code này của uart giúp tôi viết phần review cho nó
 
-08:19
-Bạn chưa đính kèm code UART nào. Bạn có thể paste code vào đây không?
-
-tôi sẽ gửi 5 file code trong đó sẽ có file testbench, file tx, file rx, file baud_gen và file top
-
-08:20
-Được, gửi cả 5 file lên đây đi, mình sẽ đọc và viết phần review cho toàn bộ thiết kế UART nhé!
 
 module baud_gen (
     input  wire clk,    // clock hệ thống 50MHz
