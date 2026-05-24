@@ -12,7 +12,6 @@ module uart_top (
     output wire       rx_done,    // pulse: nhận xong 1 byte
     output wire       rx_error    // frame error
 );
-
     // Internal signals
     wire tick_tx;  // baud tick cho TX  (x1  = 9600 baud)
     wire tick_rx;  // baud tick cho RX  (x16 = 153600 tick/s)
