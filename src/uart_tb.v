@@ -1,8 +1,5 @@
 `timescale 1ns / 1ps
-
 module uart_tb;
-
-    // ── Tín hiệu ────────────────────────────────────────────────
     reg        clk;
     reg        rst;
     reg        tx_start;
@@ -16,7 +13,6 @@ module uart_tb;
     // Loopback: nối tx → rx
     wire rx = tx;
 
-    // ── Khởi tạo DUT ────────────────────────────────────────────
     uart_top u_uart (
         .clk      (clk),
         .rst      (rst),
@@ -30,60 +26,75 @@ module uart_tb;
         .rx_error (rx_error)
     );
 
-    // ── Clock 50MHz → chu kỳ 20ns ────────────────────────────────
+    // Clock 50MHz
     initial clk = 0;
     always #10 clk = ~clk;
 
-    // ── Task gửi 1 byte ──────────────────────────────────────────
+    // Timeout = 2ms (đủ cho 1 byte ở 9600 baud)
+    localparam TIMEOUT = 2_000_000;
+
+    // Task gửi 1 byte, có timeout watchdog
     task send_byte;
         input [7:0] data;
+        integer t;
         begin
-            // Chờ nếu đang bận
             wait (!tx_busy);
             @(posedge clk);
-
-            // Phát lệnh gửi
             tx_data  = data;
             tx_start = 1;
             @(posedge clk);
             tx_start = 0;
 
-            // Chờ nhận xong
-            wait (rx_done);
-            @(posedge clk);
-
-            // Kiểm tra dữ liệu
-            if (rx_data == data)
+            // Chờ rx_done với timeout
+            t = 0;
+            while (!rx_done && t < TIMEOUT) begin
+                @(posedge clk);
+                t = t + 1;
+            end
+            if (t >= TIMEOUT)
+                $display("[TIMEOUT] Byte 0x%02X không nhận được!", data);
+            else if (rx_data == data)
                 $display("[PASS] Sent: 0x%02X | Received: 0x%02X", data, rx_data);
             else
-                $display("[FAIL] Sent: 0x%02X | Received: 0x%02X", data, rx_data);
+                $display("[FAIL] Sent: 0x%02X | Received: 0x%02X (expected 0x%02X)", data, rx_data, data);
         end
     endtask
 
-    // ── Kịch bản test ────────────────────────────────────────────
+    integer pass_cnt, fail_cnt;
+
     initial begin
-        // Khởi tạo
         rst      = 1;
         tx_start = 0;
         tx_data  = 0;
+        pass_cnt = 0;
+        fail_cnt = 0;
 
-        // Reset 5 chu kỳ
         repeat (5) @(posedge clk);
         rst = 0;
         repeat (2) @(posedge clk);
 
         $display("===== BẮT ĐẦU TEST UART =====");
 
-        // Test 1: gửi 0x55 (0101_0101)
-        $display("-- Test 1: 0x55 --");
+        // Test 1: alternating bits
+        $display("-- Test 1: 0x55 (0101_0101) --");
         send_byte(8'h55);
 
-        // Test 2: gửi 0xAA (1010_1010)
-        $display("-- Test 2: 0xAA --");
+        $display("-- Test 2: 0xAA (1010_1010) --");
         send_byte(8'hAA);
 
-        // Test 3: gửi nhiều byte liên tiếp
-        $display("-- Test 3: gửi 0x00 → 0x04 --");
+        // Test 3: giá trị biên
+        $display("-- Test 3: 0x00 và 0xFF (biên) --");
+        send_byte(8'h00);
+        send_byte(8'hFF);
+
+        // Test 4: giá trị không đối xứng (lộ lỗi nghịch bit)
+        $display("-- Test 4: 0x31, 0x12, 0xC3 (không đối xứng) --");
+        send_byte(8'h31);
+        send_byte(8'h12);
+        send_byte(8'hC3);
+
+        // Test 5: chuỗi liên tiếp
+        $display("-- Test 5: chuỗi 0x00 → 0x04 --");
         send_byte(8'h00);
         send_byte(8'h01);
         send_byte(8'h02);
@@ -91,24 +102,19 @@ module uart_tb;
         send_byte(8'h04);
 
         $display("===== KẾT THÚC TEST =====");
-
-        // Chờ thêm rồi kết thúc
         repeat (100) @(posedge clk);
         $finish;
     end
 
-    // ── Dump waveform để xem trong ModelSim ─────────────────────
     initial begin
         $dumpfile("uart_tb.vcd");
         $dumpvars(0, uart_tb);
     end
 
-    // ── Monitor tự động in khi rx_done ──────────────────────────
     always @(posedge clk) begin
         if (rx_done)
-            $display("[RX] Nhận được: 0x%02X | Error: %b", rx_data, rx_error);
+            $display("[RX] Nhận: 0x%02X | Error: %b", rx_data, rx_error);
         if (rx_error)
             $display("[ERROR] Frame error phát hiện!");
     end
-
 endmodule
