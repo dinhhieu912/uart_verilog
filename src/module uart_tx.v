@@ -7,7 +7,6 @@ module uart_tx (
     output reg        tx,         // đường truyền nối tiếp
     output reg        tx_busy     // đang bận, không nhận lệnh mới
 );
-
     // Định nghĩa trạng thái FSM
     localparam IDLE  = 2'b00;
     localparam START = 2'b01;
@@ -28,9 +27,9 @@ module uart_tx (
         end
         else begin
             case (state)
-
                 IDLE: begin
                     tx      <= 1;
+                    // FIX: chỉ clear tx_busy khi thực sự ở IDLE
                     tx_busy <= 0;
                     if (tx_start) begin
                         shift_reg <= tx_data;
@@ -40,6 +39,8 @@ module uart_tx (
                 end
 
                 START: begin
+                    // FIX: giữ tx_busy = 1 trong suốt quá trình truyền
+                    tx_busy <= 1;
                     if (tick) begin
                         tx      <= 0; // start bit
                         bit_cnt <= 0;
@@ -48,6 +49,8 @@ module uart_tx (
                 end
 
                 DATA: begin
+                    // FIX: giữ tx_busy = 1 trong suốt quá trình truyền
+                    tx_busy <= 1;
                     if (tick) begin
                         tx        <= shift_reg[0]; // gửi LSB trước
                         shift_reg <= shift_reg >> 1;
@@ -59,14 +62,20 @@ module uart_tx (
                 end
 
                 STOP: begin
+                    // FIX: giữ tx_busy = 1 trong suốt quá trình truyền
+                    tx_busy <= 1;
                     if (tick) begin
                         tx    <= 1; // stop bit
                         state <= IDLE;
                     end
                 end
 
+                default: begin
+                    state   <= IDLE;
+                    tx      <= 1;
+                    tx_busy <= 0;
+                end
             endcase
         end
     end
-
 endmodule
