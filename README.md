@@ -1,49 +1,51 @@
 # UART RTL Design & Verification
 
-> Full-duplex UART transceiver implemented in Verilog — configurable baud rate, parity, and stop-bit options with directed testbench verification.
+> Full-duplex UART transceiver implemented in Verilog — fixed 9600 baud,
+> loopback-verified testbench with timeout watchdog and pass/fail reporting.
+
 ---
 
 ## 📌 Overview
 
-UART (Universal Asynchronous Receiver-Transmitter) is one of the most widely used serial communication protocols in embedded systems. Unlike SPI or I2C, UART is **asynchronous** — meaning it does not require a shared clock signal between transmitter and receiver. Instead, both sides agree on a fixed **baud rate** (bits per second) before communication begins.
+UART (Universal Asynchronous Receiver-Transmitter) is one of the most widely
+used serial communication protocols in embedded systems. Unlike SPI or I2C,
+UART is **asynchronous** — no shared clock is required between transmitter and
+receiver. Both sides agree on a fixed **baud rate** before communication begins.
 
 ### How UART works:
 - **Idle state:** The line stays HIGH when no data is being sent.
-- **Start bit:** Transmission begins with a LOW pulse (start bit) to signal the receiver.
+- **Start bit:** Transmission begins with a LOW pulse to signal the receiver.
 - **Data bits:** 8 data bits are sent LSB-first.
-- **Parity bit (optional):** An extra bit for basic error detection.
-- **Stop bit:** One or two HIGH bits to mark the end of a frame.
+- **Stop bit:** One HIGH bit marks the end of a frame.
 
 ```
-IDLE  START   D0  D1  D2  D3  D4  D5  D6  D7  PARITY  STOP
- 1  |  0   |  x   x   x   x   x   x   x   x  |   x   |  1
+IDLE  START   D0  D1  D2  D3  D4  D5  D6  D7   STOP
+ 1  |  0   |  x   x   x   x   x   x   x   x  |  1
 ```
-
-This project implements a **full-duplex UART transceiver** (TX + RX) in Verilog, verified through a directed testbench covering normal operation, boundary cases, and fault injection.
 
 ---
 
 ## ⚙️ Features
 
 - ✅ Full-duplex UART: independent TX and RX modules
-- ✅ Configurable baud rate: 9600 / 19200 / 115200 bps
-- ✅ Programmable parity: None / Even / Odd
-- ✅ Configurable stop bits: 1 or 2
-- ✅ 16× oversampling RX logic for robust data recovery
-- ✅ FSM-based control for TX and RX datapath
-- ✅ Loopback test support
+- ✅ Fixed baud rate: 9600 bps @ 50 MHz system clock
+- ✅ Separate baud generators: TX uses ×1 tick, RX uses ×16 oversampling tick
+- ✅ 16× oversampling RX with bit-center sampling for robust data recovery
+- ✅ 2-FF metastability synchronizer on RX input
+- ✅ Frame error detection on stop-bit verification
+- ✅ FSM-based control for both TX and RX (4-state each)
+- ✅ Loopback testbench with timeout watchdog and pass/fail counter
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Area         | Details                          |
-|:-------------|:---------------------------------|
-| HDL          | Verilog                          |
-| Simulation   | Icarus Verilog, ModelSim         |
-| Waveform     | GTKWave                          |
-| Synthesis    | Intel Quartus                    |
-| Protocol     | UART (async serial)              |
+| Area       | Details                  |
+|:-----------|:-------------------------|
+| HDL        | Verilog                  |
+| Simulation | Icarus Verilog, ModelSim |
+| Waveform   | GTKWave                  |
+| Protocol   | UART (async serial)      |
 
 ---
 
@@ -52,17 +54,31 @@ This project implements a **full-duplex UART transceiver** (TX + RX) in Verilog,
 ```
 uart-project/
 ├── rtl/
+│   ├── baud_gen.v       # Baud rate generator (parametrizable)
 │   ├── uart_tx.v        # Transmitter module
 │   ├── uart_rx.v        # Receiver module
 │   └── uart_top.v       # Top-level integration
-├── uart_tb.v            # Uart testbench
-│ 
-└── README.md
+└── uart_tb.v            # Loopback testbench
 ```
 
 ---
 
 ## 🔧 RTL Design
+
+### Baud Generator (`baud_gen.v`)
+
+A parametrizable counter that divides the 50 MHz system clock down to the
+required baud tick. Two instances are used in `uart_top`:
+
+| Instance    | BAUD_RATE param  | Purpose               |
+|:------------|:-----------------|:----------------------|
+| `u_baud_tx` | 9 600            | TX — 1 tick per bit   |
+| `u_baud_rx` | 153 600 (×16)    | RX — 16 ticks per bit |
+
+- Counter width: 13 bits (MAX_COUNT = 5207 for TX)
+- Tick is asserted HIGH for exactly 1 clock cycle
+
+---
 
 ### TX Module (`uart_tx.v`)
 
@@ -72,15 +88,16 @@ The transmitter is controlled by a **4-state FSM**:
 IDLE → START → DATA → STOP
 ```
 
-| State   | Description                                      |
-|:--------|:-------------------------------------------------|
-| IDLE    | Line held HIGH, waiting for transmit request     |
-| START   | Drives line LOW for one baud period (start bit)  |
-| DATA    | Shifts out 8 data bits LSB-first                 |
-| STOP    | Drives line HIGH for 1 or 2 baud periods         |
+| State | Description                                               |
+|:------|:----------------------------------------------------------|
+| IDLE  | Line held HIGH, `tx_busy` deasserted                     |
+| START | Captures `tx_data` into shift register, asserts `tx_busy`|
+| DATA  | Drives start bit LOW on first tick                        |
+| STOP  | Shifts out 8 data bits LSB-first, one per baud tick      |
 
-- A **baud rate generator** divides the system clock to produce the correct bit timing.
-- Data is loaded into a shift register and shifted out one bit per baud period.
+- `tx_busy` remains HIGH throughout START → DATA → STOP, preventing
+  new transmission requests from being accepted mid-frame.
+- Data is loaded into an 8-bit shift register and shifted right each tick.
 
 ---
 
@@ -89,18 +106,22 @@ IDLE → START → DATA → STOP
 The receiver uses **16× oversampling** to accurately sample incoming data:
 
 ```
-IDLE → START_DETECT → SAMPLE → STOP_CHECK
+IDLE → START → DATA → STOP
 ```
 
-| State         | Description                                              |
-|:--------------|:---------------------------------------------------------|
-| IDLE          | Monitors line for falling edge (start bit detection)     |
-| START_DETECT  | Waits 8 oversampling ticks to confirm valid start bit    |
-| SAMPLE        | Samples each data bit at the center (tick 16)            |
-| STOP_CHECK    | Verifies stop bit; flags framing error if missing        |
+| State | Description                                                         |
+|:------|:--------------------------------------------------------------------|
+| IDLE  | Monitors for falling edge on synchronized RX line (gated on tick)  |
+| START | Waits 8 ticks to align to center of start bit; validates LOW       |
+| DATA  | Samples each bit at tick 16 (bit center); shifts into register     |
+| STOP  | Samples stop bit at tick 16; asserts `rx_done` or `rx_error`      |
 
-- **16× oversampling** means the receiver samples each bit 16 times per baud period, then reads at the midpoint — this makes it robust against clock drift and noise.
-- Parity is checked after all 8 data bits are received.
+- **2-FF synchronizer** (`rx_sync1`, `rx_sync2`) on the raw `rx` input
+  prevents metastability from propagating into the FSM.
+- Start detection is **gated on tick** boundary to minimize phase offset.
+- `rx_done` and `rx_error` are pulsed HIGH for exactly 1 clock cycle.
+- A missing or corrupt stop bit (LOW at sample point) sets `rx_error`
+  (frame error) instead of `rx_done`.
 
 ---
 
@@ -108,40 +129,41 @@ IDLE → START_DETECT → SAMPLE → STOP_CHECK
 
 ### Testbench Strategy
 
-A **directed testbench** was written to apply specific input stimuli and check expected outputs. Each test case targets a distinct behavior or fault scenario.
+A **directed loopback testbench** connects `tx` directly to `rx`
+(`wire rx = tx`) and sends 11 test vectors through a reusable `send_byte`
+task. Each call includes a **timeout watchdog** (2 ms / 100 000 cycles)
+and automatically increments `pass_cnt` or `fail_cnt`.
 
-### Test Cases
+### Test Vectors
 
-| # | Test Case              | Description                                              | Result  |
-|:--|:-----------------------|:---------------------------------------------------------|:--------|
-| 1 | Normal TX/RX           | Send 0x00–0xFF, verify received data matches             | ✅ Pass |
-| 2 | Parity Error Injection | Flip parity bit mid-frame, check error flag asserted     | ✅ Pass |
-| 3 | Framing Error          | Missing stop bit, check framing error flag               | ✅ Pass |
-| 4 | Baud Rate Mismatch     | TX at 115200, RX at 9600 — verify data corruption caught | ✅ Pass |
-| 5 | Loopback Test          | Connect TX output directly to RX input                   | ✅ Pass |
-| 6 | Back-to-back frames    | Send multiple frames without gap                         | ✅ Pass |
-| 7 | All zeros (0x00)       | Verify start/stop bit boundaries correct                 | ✅ Pass |
-| 8 | All ones (0xFF)        | Verify no false start bit detection                      | ✅ Pass |
+| # | Test Group          | Vectors             | Purpose                                       |
+|:--|:--------------------|:--------------------|:----------------------------------------------|
+| 1 | Alternating bits    | 0x55, 0xAA          | Catch bit-inversion and shift-direction bugs  |
+| 2 | Boundary values     | 0x00, 0xFF          | Verify start/stop boundaries at all-0/all-1   |
+| 3 | Asymmetric patterns | 0x31, 0x12, 0xC3    | Expose non-symmetric bit-ordering errors      |
+| 4 | Sequential stream   | 0x00→0x04 (5 bytes) | Verify back-to-back frame handling            |
+
+### Pass/Fail Reporting
+
+```
+===== BẮT ĐẦU TEST UART =====
+[PASS] Sent: 0x55 | Received: 0x55
+[PASS] Sent: 0xAA | Received: 0xAA
+...
+Tổng: PASS = 11 | FAIL = 0 | TOTAL = 11
+>>> TẤT CẢ TEST ĐỀU PASS ✓
+```
 
 ### Bug Found & Fixed
 
-During waveform analysis in GTKWave, an **RX sampling timing bug** was identified:
-- **Root cause:** The RX was sampling at tick 15 instead of tick 16 (center of bit), causing occasional bit misreads at higher baud rates.
-- **Fix:** Adjusted the oversampling counter threshold from 15 to 16 in the SAMPLE state logic.
+During waveform analysis, an **RX sampling phase-alignment bug** was identified:
 
----
-
-## 📊 Synthesis Results
-
-> Synthesized on **Intel Quartus** targeting Intel Cyclone IV FPGA.
-
-| Metric              | Value          |
-|:--------------------|:---------------|
-| Total LUTs          | ~85            |
-| Flip-Flops          | ~40            |
-| Fmax                | ~125 MHz       |
-| Target Clock        | 50 MHz         |
-| Timing Slack        | Positive ✅    |
+- **Root cause:** RX FSM entered START state on any falling edge of `rx_sync2`,
+  without waiting for a tick boundary — causing a phase offset of up to ±1 tick
+  (~1/16 bit period) in the oversampling counter.
+- **Fix:** Gated the IDLE → START transition on `tick` so the 16× counter
+  always starts aligned to the baud tick grid, ensuring consistent
+  bit-center sampling across all baud rates.
 
 ---
 
@@ -150,25 +172,20 @@ During waveform analysis in GTKWave, an **RX sampling timing bug** was identifie
 ### Simulate with Icarus Verilog
 
 ```bash
-# Clone the repo
-git clone https://github.com/dinhhieu912/uart-rx-verilog.git
-cd uart-rx-verilog
+git clone https://github.com/dinhhieu912/uart_verilog.git
+cd uart_verilog
 
-# Compile
-iverilog -o uart_sim tb/tb_uart_rx.v rtl/uart_rx.v
-
-# Run simulation
+iverilog -o uart_sim uart_tb.v rtl/uart_top.v rtl/uart_tx.v \
+         rtl/uart_rx.v rtl/baud_gen.v
 vvp uart_sim
-
-# View waveform
-gtkwave dump.vcd
+gtkwave uart_tb.vcd
 ```
 
 ### Simulate with ModelSim
 
 ```bash
-vlog rtl/uart_rx.v tb/tb_uart_rx.v
-vsim tb_uart_rx
+vlog rtl/baud_gen.v rtl/uart_tx.v rtl/uart_rx.v rtl/uart_top.v uart_tb.v
+vsim uart_tb
 run -all
 ```
 
@@ -176,5 +193,5 @@ run -all
 
 ## 📬 Contact
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/hi%E1%BA%BFu-tr%E1%BA%A7n-59a741305/)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/hiếu-trần-59a741305/)
 [![Gmail](https://img.shields.io/badge/Gmail-D14836?style=flat-square&logo=gmail&logoColor=white)](mailto:dinhhieu9125@gmail.com)
