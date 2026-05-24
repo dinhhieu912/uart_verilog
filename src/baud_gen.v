@@ -3,7 +3,6 @@ module baud_gen (
     input  wire rst,    // reset tích cực mức cao
     output reg  tick    // xung baud rate, cao 1 chu kỳ clock
 );
-
     // Tham số: số chu kỳ clock cho 1 baud
     parameter CLK_FREQ  = 50_000_000;
     parameter BAUD_RATE = 9600;
@@ -25,5 +24,4 @@ module baud_gen (
             tick    <= 0;
         end
     end
-
 endmodule
