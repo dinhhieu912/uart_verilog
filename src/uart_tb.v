@@ -10,7 +10,8 @@ module uart_tb;
     wire       rx_done;
     wire       rx_error;
 
-    // Loopback: nối tx → rx
+    // FIX 1: Loopback — chỉ khai báo rx một lần duy nhất
+    // (bản gốc khai báo rx hai lần: một trong danh sách wire, một ở đây)
     wire rx = tx;
 
     uart_top u_uart (
@@ -26,14 +27,17 @@ module uart_tb;
         .rx_error (rx_error)
     );
 
-    // Clock 50MHz
+    // Clock 50MHz → chu kỳ 20ns
     initial clk = 0;
     always #10 clk = ~clk;
 
     // Timeout = 2ms (đủ cho 1 byte ở 9600 baud)
     localparam TIMEOUT = 2_000_000;
 
-    // Task gửi 1 byte, có timeout watchdog
+    // FIX 2: pass_cnt và fail_cnt được cập nhật bên trong task
+    integer pass_cnt, fail_cnt;
+
+    // Task gửi 1 byte, có timeout watchdog và cập nhật counter
     task send_byte;
         input [7:0] data;
         integer t;
@@ -51,21 +55,31 @@ module uart_tb;
                 @(posedge clk);
                 t = t + 1;
             end
-            if (t >= TIMEOUT)
+
+            if (t >= TIMEOUT) begin
                 $display("[TIMEOUT] Byte 0x%02X không nhận được!", data);
-            else if (rx_data == data)
+                // FIX 2: tính timeout là fail
+                fail_cnt = fail_cnt + 1;
+            end
+            else if (rx_data == data) begin
                 $display("[PASS] Sent: 0x%02X | Received: 0x%02X", data, rx_data);
-            else
-                $display("[FAIL] Sent: 0x%02X | Received: 0x%02X (expected 0x%02X)", data, rx_data, data);
+                // FIX 2: tăng pass_cnt
+                pass_cnt = pass_cnt + 1;
+            end
+            else begin
+                $display("[FAIL] Sent: 0x%02X | Received: 0x%02X (expected 0x%02X)",
+                          data, rx_data, data);
+                // FIX 2: tăng fail_cnt
+                fail_cnt = fail_cnt + 1;
+            end
         end
     endtask
-
-    integer pass_cnt, fail_cnt;
 
     initial begin
         rst      = 1;
         tx_start = 0;
         tx_data  = 0;
+        // FIX 2: khởi tạo counter
         pass_cnt = 0;
         fail_cnt = 0;
 
@@ -78,22 +92,21 @@ module uart_tb;
         // Test 1: alternating bits
         $display("-- Test 1: 0x55 (0101_0101) --");
         send_byte(8'h55);
-
         $display("-- Test 2: 0xAA (1010_1010) --");
         send_byte(8'hAA);
 
-        // Test 3: giá trị biên
+        // Test 2: giá trị biên
         $display("-- Test 3: 0x00 và 0xFF (biên) --");
         send_byte(8'h00);
         send_byte(8'hFF);
 
-        // Test 4: giá trị không đối xứng (lộ lỗi nghịch bit)
+        // Test 3: giá trị không đối xứng (lộ lỗi nghịch bit)
         $display("-- Test 4: 0x31, 0x12, 0xC3 (không đối xứng) --");
         send_byte(8'h31);
         send_byte(8'h12);
         send_byte(8'hC3);
 
-        // Test 5: chuỗi liên tiếp
+        // Test 4: chuỗi liên tiếp
         $display("-- Test 5: chuỗi 0x00 → 0x04 --");
         send_byte(8'h00);
         send_byte(8'h01);
@@ -101,7 +114,16 @@ module uart_tb;
         send_byte(8'h03);
         send_byte(8'h04);
 
+        // FIX 2: in tổng kết PASS/FAIL
         $display("===== KẾT THÚC TEST =====");
+        $display("Tổng: PASS = %0d | FAIL = %0d | TOTAL = %0d",
+                  pass_cnt, fail_cnt, pass_cnt + fail_cnt);
+
+        if (fail_cnt == 0)
+            $display(">>> TẤT CẢ TEST ĐỀU PASS ✓");
+        else
+            $display(">>> CÓ %0d TEST THẤT BẠI ✗", fail_cnt);
+
         repeat (100) @(posedge clk);
         $finish;
     end
@@ -111,10 +133,12 @@ module uart_tb;
         $dumpvars(0, uart_tb);
     end
 
+    // Monitor realtime
     always @(posedge clk) begin
         if (rx_done)
             $display("[RX] Nhận: 0x%02X | Error: %b", rx_data, rx_error);
         if (rx_error)
             $display("[ERROR] Frame error phát hiện!");
     end
+
 endmodule
